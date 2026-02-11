@@ -15,7 +15,11 @@ def _filter(df: pd.DataFrame, sector: Optional[str] = None, quarter: Optional[st
     if sector:
         out = out[out["sector"].astype(str).str.strip().str.casefold() == sector.strip().casefold()]
     if quarter:
-        qcol = out.get("close_date") or out.get("start_date")
+        qcol = None
+        if "close_date" in out.columns:
+            qcol = out["close_date"]
+        elif "start_date" in out.columns:
+            qcol = out["start_date"]
         if qcol is not None:
             qvals = qcol.apply(_quarter_str)
             out = out[qvals == quarter]
@@ -23,11 +27,20 @@ def _filter(df: pd.DataFrame, sector: Optional[str] = None, quarter: Optional[st
 
 
 def calculate_pipeline_value(deals_df: pd.DataFrame, sector: Optional[str] = None, quarter: Optional[str] = None) -> float:
-    """Sum of values for non-won deals, optionally filtered by sector and quarter."""
+    """Sum of values for non-won deals, optionally filtered by sector and quarter.
+
+    If a 'probability' column (0..1) exists, compute weighted pipeline = sum(value * probability).
+    """
     if deals_df is None or deals_df.empty:
         return 0.0
     df = _filter(deals_df, sector, quarter)
-    pipeline = df[df["status"].str.lower() != "won"]["value"].fillna(0).sum()
+    remaining = df[df["status"].str.lower() != "won"].copy()
+    if "probability" in remaining.columns and remaining["probability"].notna().any():
+        prob = remaining["probability"].astype(float).fillna(1.0)
+        val = remaining["value"].fillna(0).astype(float)
+        pipeline = (val * prob).sum()
+    else:
+        pipeline = remaining["value"].fillna(0).sum()
     return float(pipeline)
 
 

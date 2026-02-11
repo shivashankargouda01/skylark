@@ -54,6 +54,7 @@ def ask(payload: AskPayload) -> Dict[str, Any]:
     deals_df = pd.DataFrame()
     work_orders_df = pd.DataFrame()
     caveats: List[str] = []
+    clarifications: List[str] = []
 
     try:
         if deals_board_id:
@@ -91,12 +92,20 @@ def ask(payload: AskPayload) -> Dict[str, Any]:
         if metric == "pipeline_value":
             val = calculate_pipeline_value(deals_clean, sector=sector, quarter=timeframe)
             results["metrics"]["pipeline_value"] = val
+            if sector is None:
+                clarifications.append("Specify a sector (e.g., Healthcare) for focused pipeline insights.")
+            if timeframe is None:
+                clarifications.append("Add a timeframe (e.g., 2026Q1 or 'last quarter') to filter pipeline.")
         elif metric == "revenue":
             val = calculate_revenue(deals_clean)
             results["metrics"]["revenue"] = val
+            if timeframe is None:
+                clarifications.append("If you meant a specific quarter, include it (e.g., 'last quarter').")
         elif metric == "active_projects_value":
             val = active_projects_value(work_orders_clean)
             results["metrics"]["active_projects_value"] = val
+            if sector is None:
+                clarifications.append("Provide a sector (e.g., Operations) to focus active projects value.")
         elif metric == "sector_breakdown":
             results["metrics"]["sector_breakdown"] = sector_breakdown(deals_clean)
         else:
@@ -112,5 +121,6 @@ def ask(payload: AskPayload) -> Dict[str, Any]:
         "intent": intent,
         "summary": summary,
         "caveats": caveats,
+        "clarifications": clarifications,
         "details": results,
     }

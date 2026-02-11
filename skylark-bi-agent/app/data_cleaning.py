@@ -4,10 +4,33 @@ from typing import Optional
 import pandas as pd
 
 MONEY_REGEX = re.compile(r"[-+]?\$?\s*([0-9]{1,3}(?:,[0-9]{3})*|[0-9]+)(?:\.[0-9]{1,2})?")
+PCT_REGEX = re.compile(r"([0-9]{1,3})(?:\.[0-9]+)?\s*%")
 
 
 def _parse_money(value: Optional[str]) -> Optional[float]:
     if value is None:
+        return None
+
+def _parse_probability(value: Optional[str]) -> Optional[float]:
+    """Parse probability strings like '60%' or numbers 0-100 into 0..1 floats."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        v = float(value)
+        return v / 100.0 if v > 1 else max(0.0, min(1.0, v))
+    s = str(value).strip()
+    if not s:
+        return None
+    m = PCT_REGEX.search(s)
+    if m:
+        try:
+            return float(m.group(1)) / 100.0
+        except Exception:
+            return None
+    try:
+        v = float(s)
+        return v / 100.0 if v > 1 else max(0.0, min(1.0, v))
+    except Exception:
         return None
     if isinstance(value, (int, float)):
         return float(value)
@@ -30,7 +53,8 @@ def _parse_money(value: Optional[str]) -> Optional[float]:
 
 
 def _to_dt(series: pd.Series) -> pd.Series:
-    return pd.to_datetime(series, errors="coerce", infer_datetime_format=True)
+    # Pandas 3.0 removed infer_datetime_format; rely on default parsing with coercion
+    return pd.to_datetime(series, errors="coerce")
 
 
 def clean_deals(df: pd.DataFrame) -> pd.DataFrame:
@@ -50,25 +74,37 @@ def clean_deals(df: pd.DataFrame) -> pd.DataFrame:
             colmap[col] = "deal_name"
         elif "sector" in lc:
             colmap[col] = "sector"
-        elif "status" in lc:
+        elif "status" in lc or "stage" in lc:
             colmap[col] = "status"
-        elif any(k in lc for k in ["deal value", "amount", "value"]):
+        elif any(k in lc for k in ["deal value", "amount", "value", "projected revenue", "deal size", "budget"]):
             colmap[col] = "value"
-        elif any(k in lc for k in ["close date", "expected close", "close"]):
+        elif any(k in lc for k in ["close date", "expected close", "close", "due date", "date"]):
             colmap[col] = "close_date"
+        elif any(k in lc for k in ["probability", "win likelihood", "confidence"]):
+            colmap[col] = "probability"
 
     df2 = df.rename(columns=colmap)
 
     # Ensure required columns exist
-    for req in ["deal_name", "sector", "status", "value", "close_date"]:
+    for req in ["deal_name", "sector", "status", "value", "close_date", "probability"]:
         if req not in df2.columns:
             df2[req] = None
 
     # Money to float
     df2["value"] = df2["value"].apply(_parse_money)
+    # If value is entirely missing, attempt to auto-detect a money-like column
+    if df2["value"].isna().all():
+        for col in df.columns:
+            if col in df2.columns:
+                continue
+            parsed = df[col].apply(_parse_money)
+            if parsed.notna().sum() >= max(3, int(0.3 * len(df))):
+                df2["value"] = parsed
+                break
 
     # Dates
     df2["close_date"] = _to_dt(df2["close_date"])
+    df2["probability"] = df2["probability"].apply(_parse_probability)
 
     # Missing sector
     df2["sector"] = df2["sector"].fillna("Unknown")
@@ -76,7 +112,7 @@ def clean_deals(df: pd.DataFrame) -> pd.DataFrame:
     # Normalize status casing
     df2["status"] = df2["status"].astype(str).str.strip().str.title()
 
-    return df2[["deal_name", "sector", "status", "value", "close_date"]]
+    return df2[["deal_name", "sector", "status", "value", "close_date", "probability"]]
 
 
 def clean_work_orders(df: pd.DataFrame) -> pd.DataFrame:
@@ -95,9 +131,9 @@ def clean_work_orders(df: pd.DataFrame) -> pd.DataFrame:
             colmap[col] = "project_name"
         elif "sector" in lc:
             colmap[col] = "sector"
-        elif "status" in lc:
+        elif "status" in lc or "stage" in lc:
             colmap[col] = "status"
-        elif any(k in lc for k in ["contract value", "value", "amount"]):
+        elif any(k in lc for k in ["contract value", "value", "amount", "budget", "project value"]):
             colmap[col] = "contract_value"
         elif "start" in lc:
             colmap[col] = "start_date"
@@ -111,6 +147,14 @@ def clean_work_orders(df: pd.DataFrame) -> pd.DataFrame:
             df2[req] = None
 
     df2["contract_value"] = df2["contract_value"].apply(_parse_money)
+    if df2["contract_value"].isna().all():
+        for col in df.columns:
+            if col in df2.columns:
+                continue
+            parsed = df[col].apply(_parse_money)
+            if parsed.notna().sum() >= max(3, int(0.3 * len(df))):
+                df2["contract_value"] = parsed
+                break
     df2["start_date"] = _to_dt(df2["start_date"]) if "start_date" in df2 else None
     df2["end_date"] = _to_dt(df2["end_date"]) if "end_date" in df2 else None
 
