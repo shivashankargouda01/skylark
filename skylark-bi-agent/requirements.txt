@@ -45,8 +45,6 @@ safetensors==0.4.5
 six==1.17.0
 sniffio==1.3.1
 starlette==0.50.0
-# Editable install with no version control (stscache==0.0.1)
--e d:\san 1
 tokenizers==0.21.0
 tqdm==4.67.1
 transformers==4.47.1
